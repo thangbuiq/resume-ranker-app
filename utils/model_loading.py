@@ -10,13 +10,19 @@ bert_model = BertModel.from_pretrained('bert-base-uncased')
 sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def encode_text_bert(text):
-    input_ids = bert_tokenizer.encode(text, add_special_tokens=True, truncation=True, max_length=512, padding='max_length')
-    input_ids = torch.tensor(input_ids).unsqueeze(0)  # Batch size 1
     with torch.no_grad():
-        outputs = bert_model(input_ids)
+        # Tokenize the input text
+        inputs = bert_tokenizer(text, add_special_tokens=True, truncation=True, 
+                                max_length=200, padding=True, return_tensors='pt')
+        if torch.cuda.is_available():
+            inputs = {k: v.cuda() for k, v in inputs.items()}
+        # Pass the tokenized input to the model
+        outputs = bert_model(**inputs)
         last_hidden_states = outputs.last_hidden_state
         mean_hidden_states = last_hidden_states.mean(dim=1)
-    return mean_hidden_states.squeeze().numpy()
+    return mean_hidden_states
 
 def encode_text_sbert(text):
-    return sbert_model.encode(text)
+    with torch.no_grad():
+        embeddings = sbert_model.encode(text, convert_to_tensor=True)
+    return embeddings
