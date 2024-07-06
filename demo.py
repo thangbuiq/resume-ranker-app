@@ -26,10 +26,22 @@ bert_tokenizer = data['bert_tokenizer']
 bert_model = data['bert_model']
 sbert_model = data['sbert_model']
 
-df = pd.read_csv('data/data_resume.csv')
+df = pd.read_csv('data/data_linkedin.csv')
 df.drop_duplicates(inplace=True)
-labels_dict = {label: idx for idx, label in enumerate(df.Category.unique())}
-df.Category = df.Category.apply(lambda x: labels_dict[x]).astype(int)
+labels_dict = {label: idx for idx, label in enumerate(df.category.unique())}
+df.category = df.category.apply(lambda x: labels_dict[x]).astype(int)
+
+df['name_candidate'] = df['Name']
+
+# Gộp các cột thông tin thành một cột resume
+df['Resume'] = df.apply(lambda row: ' '.join([
+    str(row['description']) if pd.notna(row['description']) else '',
+    str(row['clean_skills']) if pd.notna(row['clean_skills']) else '',
+    str(row['Experience']) if pd.notna(row['Experience']) else '',
+]), axis=1)
+
+# Chỉ giữ lại các cột index, name_candidate và resume
+df = df[['index', 'name_candidate','category', 'Resume', 'linkedin', 'Experience', 'description']]
 
 logger.info("Applying text preprocessing...")
 df['cleaned_resume'] = text_preprocessor.transform(df['Resume'])
@@ -44,7 +56,7 @@ def match_candidates(job_description, model_choice):
     logger.info("Encoding job description...")
     if model_choice == "BERT":
         encoded_job = encode_text_bert([job_description])
-        encoded_resumes = encode_text_bert(df.Resume.tolist())
+        encoded_resumes = encode_text_bert(df.cleaned_resume.tolist())
         logger.info("Job description encoded with BERT.")
         
         logger.info("Calculating similarity scores with BERT...")
@@ -52,7 +64,7 @@ def match_candidates(job_description, model_choice):
         logger.info("Similarity scores calculated with BERT.")
     else:
         encoded_job = sbert_model.encode([job_description], convert_to_tensor=True)
-        encoded_resumes = sbert_model.encode(df.Resume.tolist(), convert_to_tensor=True)
+        encoded_resumes = sbert_model.encode(df.cleaned_resume.tolist(), convert_to_tensor=True)
         logger.info("Job description encoded with SBERT.")
         
         logger.info("Calculating similarity scores with SBERT...")
@@ -62,17 +74,31 @@ def match_candidates(job_description, model_choice):
     print(df.head())
     df_ranked = df.sort_values(by='similarity_score', ascending=False)
     top_candidates = df_ranked.head(5)
-
-    return json.dumps(top_candidates[['similarity_score', 'Resume']].to_dict(orient='records'))
+    markdown = ""
+    
+    for idx, row in top_candidates.iterrows():
+        markdown += f"### Candidate {idx+1} - {row['name_candidate']} \n"
+        markdown += f"- **Similarity Score**: {row['similarity_score']:.4f} \n"
+        markdown += f"- **Description**: {row['description']} \n"
+        if len(row['Resume']) > 500:
+            display_resume = row['Resume'][:500] + "..."
+        else:
+            display_resume = row['Resume']
+        markdown += f"- **Resume**: {display_resume} \n"
+        markdown += f"- **Contact via LinkedIn**: {row['linkedin']} \n\n"
+        
+    return markdown
 
 def gradio_interface(job_description, model_choice):
     return match_candidates(job_description, model_choice)
 
 inputs = [gr.Textbox(lines=10, placeholder="Enter job description here..."), 
           gr.Dropdown(choices=["BERT", "SBERT"], value="SBERT", label="Model Choice")]
-outputs = gr.JSON(label="Top 5 Candidates")
+
+# return top-K candidates with their similarity scores, name, resume, and display their profile picture
+outputs = [gr.Markdown(label="Top-K Candidates")]
 demo = gr.Interface(fn=gradio_interface, inputs=inputs, outputs=outputs, title="Job Description Matcher", allow_flagging="never", theme=gr.themes.Soft())
 
 if __name__ == "__main__":
     logger.info("Launching Gradio interface...")
-    demo.launch(server_port=8080, debug=True, share=False)
+    demo.launch(server_port=8080, debug=True, share=False, server_name="localhost")
