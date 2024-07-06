@@ -12,13 +12,18 @@ logger = logging.getLogger()
 
 if os.path.exists('models_and_functions.pkl'):
     logger.info("Loading models and functions...")
-    with open('models_and_functions.pkl', 'rb') as f:
-        data = pickle.load(f)
 else:
     logger.error("Models and functions not found. Please run this command to save the models and functions.")
     logger.error("python save_models_and_functions.py")
-    exit()
+    logger.info("Running the command to save the models and functions...")
+    # use subprocess to run the command to save the models and functions
+    import subprocess
+    subprocess.run(["python", "save_models_and_functions.py"])
+    logger.info("Models and functions saved successfully.")
 
+with open('models_and_functions.pkl', 'rb') as f:
+    data = pickle.load(f)
+        
 text_preprocessor = data['text_preprocessor']
 encode_text_bert = data['encode_text_bert']
 encode_text_sbert = data['encode_text_sbert']
