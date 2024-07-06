@@ -1,13 +1,14 @@
 import pandas as pd
-import json
 import gradio as gr
 import logging
 import pickle
 from torch.nn import CosineSimilarity
+
 import os
+import warnings
+warnings.filterwarnings("ignore")
 
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
 if os.path.exists('models_and_functions.pkl'):
@@ -50,6 +51,7 @@ df = df[['index', 'name_candidate','category', 'Resume', 'linkedin', 'Experience
 
 logger.info("Applying text preprocessing...")
 df['cleaned_resume'] = text_preprocessor.transform(df['Resume'])
+df.drop_duplicates(inplace=True)
 logger.info("Text preprocessing completed.")
 
 def calculate_cosine_similarity(encoded_job, encoded_resumes):
@@ -57,51 +59,50 @@ def calculate_cosine_similarity(encoded_job, encoded_resumes):
     return cosine_sim(encoded_job, encoded_resumes)
 
 # Function to `ma`tch candidates
-def match_candidates(job_description, model_choice):
+def match_candidates(job_description, top_k=5, threshold=0.3):
+    logger.setLevel(logging.INFO)
     logger.info("Encoding job description...")
-    if model_choice == "BERT":
-        encoded_job = encode_text_bert([job_description])
-        encoded_resumes = encode_text_bert(df.cleaned_resume.tolist())
-        logger.info("Job description encoded with BERT.")
-        
-        logger.info("Calculating similarity scores with BERT...")
-        df['similarity_score'] = calculate_cosine_similarity(encoded_job, encoded_resumes)
-        logger.info("Similarity scores calculated with BERT.")
-    else:
-        encoded_job = sbert_model.encode([job_description], convert_to_tensor=True)
-        encoded_resumes = sbert_model.encode(df.cleaned_resume.tolist(), convert_to_tensor=True)
-        logger.info("Job description encoded with SBERT.")
-        
-        logger.info("Calculating similarity scores with SBERT...")
-        df['similarity_score'] = calculate_cosine_similarity(encoded_job, encoded_resumes)
-        logger.info("Similarity scores calculated with SBERT.")
+
+    encoded_job = sbert_model.encode([job_description], convert_to_tensor=True)
+    encoded_resumes = sbert_model.encode(df.cleaned_resume.tolist(), convert_to_tensor=True)
+    logger.info("Job description encoded with SBERT.")
+    
+    logger.info("Calculating similarity scores with SBERT...")
+    df['similarity_score'] = calculate_cosine_similarity(encoded_job, encoded_resumes)
+    logger.info("Similarity scores calculated with SBERT.")
     
     print(df.head())
     df_ranked = df.sort_values(by='similarity_score', ascending=False)
-    top_candidates = df_ranked.head(5)
-    markdown = ""
     
-    for idx, row in top_candidates.iterrows():
-        markdown += f"### Candidate {idx+1} - {row['name_candidate']} \n"
-        markdown += f"- **Similarity Score**: {row['similarity_score']:.4f} \n"
-        markdown += f"- **Description**: {row['description']} \n"
-        if len(row['Resume']) > 500:
-            display_resume = row['Resume'][:500] + "..."
-        else:
-            display_resume = row['Resume']
-        markdown += f"- **Resume**: {display_resume} \n"
-        markdown += f"- **Contact via LinkedIn**: {row['linkedin']} \n\n"
+    df_ranked = df_ranked[df_ranked['similarity_score'] >= threshold]
+    top_candidates = df_ranked.head(top_k)
+    
+    if len(top_candidates) == 0:
+        markdown = "No candidates matching the job description."
+    else:
+        markdown = ""
         
+        for idx, row in top_candidates.iterrows():
+            markdown += f"### Candidate {idx+1} - {row['name_candidate']} \n"
+            markdown += f"- **Similarity Score**: {row['similarity_score']:.4f} \n"
+            if len(row['Resume']) > 800:
+                display_resume = row['Resume'][:800] + " ...(truncated)"
+            else:
+                display_resume = row['Resume']
+            markdown += f"- **Resume**: {display_resume} \n"
+            markdown += f"- **Contact via LinkedIn**: {row['linkedin']} \n---\n"
+
+    logger.setLevel(logging.ERROR)
     return markdown
 
-def gradio_interface(job_description, model_choice):
-    return match_candidates(job_description, model_choice)
+def gradio_interface(job_description, top_k):
+    return match_candidates(job_description, top_k)
 
-inputs = [gr.Textbox(lines=10, placeholder="Enter job description here..."), 
-          gr.Dropdown(choices=["BERT", "SBERT"], value="SBERT", label="Model Choice")]
+inputs = [gr.Textbox(lines=10, placeholder="Enter job description here...", label="Job Description",),
+          gr.Slider(value=5, label="Top-K candidates to display (won't affect the performance)", minimum=1, maximum=20, step=1)]
 
 # return top-K candidates with their similarity scores, name, resume, and display their profile picture
-outputs = [gr.Markdown(label="Top-K Candidates")]
+outputs = [gr.Markdown(label="Top-K Candidates", show_label=True, value="Please submit the job description to get the top-K candidates.")]
 demo = gr.Interface(fn=gradio_interface, inputs=inputs, outputs=outputs, title="Job Description Matcher", allow_flagging="never", theme=gr.themes.Soft())
 
 if __name__ == "__main__":
