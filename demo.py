@@ -4,10 +4,12 @@ import pickle
 import warnings
 
 import gradio as gr
-import pandas as pd
 from torch.nn import CosineSimilarity
+from utils.database_loading import load_data
 
 warnings.filterwarnings("ignore")
+
+RESUME_PATH = "data/data_linkedin.csv"
 
 logging.basicConfig(
     level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -38,37 +40,7 @@ bert_tokenizer = data["bert_tokenizer"]
 bert_model = data["bert_model"]
 sbert_model = data["sbert_model"]
 
-df = pd.read_csv("data/data_linkedin.csv")
-df.drop_duplicates(inplace=True)
-labels_dict = {label: idx for idx, label in enumerate(df.category.unique())}
-df.category = df.category.apply(lambda x: labels_dict[x]).astype(int)
-
-df["name_candidate"] = df["Name"]
-
-# Gộp các cột thông tin thành một cột resume
-df["Resume"] = df.apply(
-    lambda row: " ".join(
-        [
-            str(row["description"]) if pd.notna(row["description"]) else "",
-            str(row["clean_skills"]) if pd.notna(row["clean_skills"]) else "",
-            str(row["Experience"]) if pd.notna(row["Experience"]) else "",
-        ]
-    ),
-    axis=1,
-)
-
-# Chỉ giữ lại các cột index, name_candidate và resume
-df = df[
-    [
-        "index",
-        "name_candidate",
-        "category",
-        "Resume",
-        "linkedin",
-        "Experience",
-        "description",
-    ]
-]
+df = load_data(RESUME_PATH)
 
 logger.info("Applying text preprocessing...")
 df["cleaned_resume"] = text_preprocessor.transform(df["Resume"])
